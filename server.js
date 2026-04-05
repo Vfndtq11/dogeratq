@@ -1,6 +1,7 @@
 const express = require('express');
 const http = require('http');
 const socketIo = require('socket.io');
+const path = require('path');
 
 const app = express();
 const server = http.createServer(app);
@@ -11,11 +12,24 @@ const io = socketIo(server, {
   }
 });
 
-// Раздаём статические файлы
-app.use(express.static('public'));
+// Раздаём статические файлы из КОРНЕВОЙ папки
+app.use(express.static(__dirname));
+
+// Отдельные маршруты для HTML файлов
+app.get('/', (req, res) => {
+  res.sendFile(path.join(__dirname, 'index.html'));
+});
+
+app.get('/streamer.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'streamer.html'));
+});
+
+app.get('/viewer.html', (req, res) => {
+  res.sendFile(path.join(__dirname, 'viewer.html'));
+});
 
 // Хранилище комнат и стримов
-const streams = new Map(); // streamId -> { streamerSocketId, password, viewers }
+const streams = new Map();
 
 io.on('connection', (socket) => {
   console.log('Клиент подключился:', socket.id);
@@ -37,7 +51,7 @@ io.on('connection', (socket) => {
     
     socket.join(`stream:${streamId}`);
     callback({ success: true });
-    console.log(`Стрим создан: ${streamId}`);
+    console.log(`✅ Стрим создан: ${streamId}`);
   });
 
   // Стример отправляет SDP offer
@@ -83,11 +97,8 @@ io.on('connection', (socket) => {
       return;
     }
     
-    // Добавляем зрителя
     stream.viewers.add(socket.id);
     socket.join(`stream:${streamId}`);
-    
-    // Сохраняем информацию о зрителе
     socket.streamData = { streamId, role: 'viewer' };
     
     callback({ 
@@ -96,32 +107,29 @@ io.on('connection', (socket) => {
       viewerCount: stream.viewers.size
     });
     
-    // Уведомляем стримера о новом зрителе
     io.to(stream.streamerSocketId).emit('streamer:viewer-joined', {
       viewerCount: stream.viewers.size
     });
     
-    console.log(`Зритель подключился к ${streamId}, всего: ${stream.viewers.size}`);
+    console.log(`👥 Зритель подключился к ${streamId}, всего: ${stream.viewers.size}`);
   });
 
-  // Зритель отключается
+  // Отключение
   socket.on('disconnect', () => {
-    // Удаляем из списка зрителей в стриме
     for (const [streamId, stream] of streams.entries()) {
       if (stream.viewers.has(socket.id)) {
         stream.viewers.delete(socket.id);
         io.to(stream.streamerSocketId).emit('streamer:viewer-left', {
           viewerCount: stream.viewers.size
         });
-        console.log(`Зритель отключился от ${streamId}, осталось: ${stream.viewers.size}`);
+        console.log(`👋 Зритель отключился от ${streamId}, осталось: ${stream.viewers.size}`);
         break;
       }
       
-      // Если отключился стример — удаляем стрим
       if (stream.streamerSocketId === socket.id) {
         streams.delete(streamId);
         io.to(`stream:${streamId}`).emit('streamer:disconnected');
-        console.log(`Стрим ${streamId} завершён`);
+        console.log(`🔴 Стрим ${streamId} завершён`);
         break;
       }
     }
@@ -130,5 +138,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
-  console.log(`Сервер запущен на http://localhost:${PORT}`);
+  console.log(`🚀 Сервер запущен на http://localhost:${PORT}`);
 });
