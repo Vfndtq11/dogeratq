@@ -1,142 +1,42 @@
-const express = require('express');
-const http = require('http');
-const socketIo = require('socket.io');
-const path = require('path');
+const NodeMediaServer = require('node-media-server');
 
-const app = express();
-const server = http.createServer(app);
-const io = socketIo(server, {
-  cors: {
-    origin: "*",
-    methods: ["GET", "POST"]
+const config = {
+  rtmp: {
+    port: 1935,
+    chunk_size: 60000,
+    gop_cache: true,
+    ping: 30,
+    ping_timeout: 60
+  },
+  http: {
+    port: 8000,
+    allow_origin: '*',
+    mediaroot: './media'
+  },
+  trans: {
+    ffmpeg: '/usr/bin/ffmpeg',  // на Render ffmpeg предустановлен
+    tasks: [
+      {
+        app: 'live',
+        hls: true,
+        hlsFlags: '[hls_time=2:hls_list_size=3:hls_flags=delete_segments]',
+        dash: true,
+        dashFlags: '[f=dash:window_size=3:extra_window_size=5]'
+      }
+    ]
   }
-});
+};
 
-// Раздаём статические файлы из КОРНЕВОЙ папки
-app.use(express.static(__dirname));
+const nms = new NodeMediaServer(config);
+nms.run();
 
-// Отдельные маршруты для HTML файлов
-app.get('/', (req, res) => {
-  res.sendFile(path.join(__dirname, 'index.html'));
-});
-
-app.get('/streamer.html', (req, res) => {
-  res.sendFile(path.join(__dirname, 'streamer.html'));
-});
-
-app.get('/viewer.html', (req, res) => {
-  res.sendFile(path.join(__dirname, 'viewer.html'));
-});
-
-// Хранилище комнат и стримов
-const streams = new Map();
-
-io.on('connection', (socket) => {
-  console.log('Клиент подключился:', socket.id);
-
-  // Стример создаёт стрим
-  socket.on('streamer:create', (data, callback) => {
-    const { streamId, password } = data;
-    
-    if (streams.has(streamId)) {
-      callback({ success: false, error: 'Stream ID уже существует' });
-      return;
-    }
-    
-    streams.set(streamId, {
-      streamerSocketId: socket.id,
-      password: password,
-      viewers: new Set()
-    });
-    
-    socket.join(`stream:${streamId}`);
-    callback({ success: true });
-    console.log(`✅ Стрим создан: ${streamId}`);
-  });
-
-  // Стример отправляет SDP offer
-  socket.on('streamer:offer', (data) => {
-    const { streamId, targetSocketId, offer } = data;
-    io.to(targetSocketId).emit('viewer:offer', {
-      streamId,
-      offer,
-      streamerSocketId: socket.id
-    });
-  });
-
-  // Зритель отправляет SDP answer
-  socket.on('viewer:answer', (data) => {
-    const { streamerSocketId, answer } = data;
-    io.to(streamerSocketId).emit('streamer:answer', { answer });
-  });
-
-  // Зритель отправляет ICE candidate
-  socket.on('viewer:ice-candidate', (data) => {
-    const { streamerSocketId, candidate } = data;
-    io.to(streamerSocketId).emit('streamer:ice-candidate', { candidate });
-  });
-
-  // Стример отправляет ICE candidate
-  socket.on('streamer:ice-candidate', (data) => {
-    const { viewerSocketId, candidate } = data;
-    io.to(viewerSocketId).emit('viewer:ice-candidate', { candidate });
-  });
-
-  // Зритель подключается к стриму
-  socket.on('viewer:join', (data, callback) => {
-    const { streamId, password } = data;
-    
-    const stream = streams.get(streamId);
-    if (!stream) {
-      callback({ success: false, error: 'Стрим не найден' });
-      return;
-    }
-    
-    if (stream.password !== password) {
-      callback({ success: false, error: 'Неверный пароль' });
-      return;
-    }
-    
-    stream.viewers.add(socket.id);
-    socket.join(`stream:${streamId}`);
-    socket.streamData = { streamId, role: 'viewer' };
-    
-    callback({ 
-      success: true, 
-      streamerSocketId: stream.streamerSocketId,
-      viewerCount: stream.viewers.size
-    });
-    
-    io.to(stream.streamerSocketId).emit('streamer:viewer-joined', {
-      viewerCount: stream.viewers.size
-    });
-    
-    console.log(`👥 Зритель подключился к ${streamId}, всего: ${stream.viewers.size}`);
-  });
-
-  // Отключение
-  socket.on('disconnect', () => {
-    for (const [streamId, stream] of streams.entries()) {
-      if (stream.viewers.has(socket.id)) {
-        stream.viewers.delete(socket.id);
-        io.to(stream.streamerSocketId).emit('streamer:viewer-left', {
-          viewerCount: stream.viewers.size
-        });
-        console.log(`👋 Зритель отключился от ${streamId}, осталось: ${stream.viewers.size}`);
-        break;
-      }
-      
-      if (stream.streamerSocketId === socket.id) {
-        streams.delete(streamId);
-        io.to(`stream:${streamId}`).emit('streamer:disconnected');
-        console.log(`🔴 Стрим ${streamId} завершён`);
-        break;
-      }
-    }
-  });
-});
-
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`🚀 Сервер запущен на http://localhost:${PORT}`);
-});
+console.log('🚀 RTMP сервер запущен!');
+console.log('📡 RTMP порт: 1935');
+console.log('🌐 HLS порт: 8000');
+console.log('');
+console.log('📱 Настройка в PRISM:');
+console.log('   URL: rtmp://ВАШ_САЙТ.onrender.com/live');
+console.log('   Stream Key: moto');
+console.log('');
+console.log('👁️ Ссылка для зрителей:');
+console.log('   http://ВАШ_САЙТ.onrender.com/live/moto/index.m3u8');
