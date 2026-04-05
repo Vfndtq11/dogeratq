@@ -1,13 +1,12 @@
 {
-  "name": "moto-stream",
+  "name": "moto-stream-server",
   "version": "1.0.0",
-  "description": "WebRTC стриминг с телефона на сайт",
+  "description": "RTMP streaming server for MotoStream",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
-    "socket.io": "^4.6.1"
+    "node-media-server": "^4.2.4"
   }
 }
